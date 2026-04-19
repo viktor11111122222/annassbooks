@@ -1,17 +1,20 @@
-//
-//  anas_booksApp.swift
-//  anas-books
-//
-//  Created by Viktor Djordjevic on 15. 4. 2026..
-//
-
 import SwiftUI
 
 @main
 struct anas_booksApp: App {
+    @StateObject private var auth = AuthViewModel()
+
     var body: some Scene {
         WindowGroup {
-            LoginView()
+            Group {
+                if auth.userSession != nil {
+                    HomeView()
+                } else {
+                    LoginView()
+                }
+            }
+            .environmentObject(auth)
+            .animation(.easeInOut(duration: 0.3), value: auth.userSession)
         }
     }
 }
