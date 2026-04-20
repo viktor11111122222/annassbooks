@@ -52,7 +52,7 @@ function extractJsonLd(html) {
   for (const m of matches) {
     try {
       const data = JSON.parse(m[1]);
-      const items = Array.isArray(data) ? data : [data];
+      const items = Array.isArray(data) ? data : (data['@graph'] ? data['@graph'] : [data]);
       for (const item of items) {
         if (item['@type'] === 'Product' || item['@type'] === 'Book') return item;
       }

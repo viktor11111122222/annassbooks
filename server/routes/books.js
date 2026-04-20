@@ -6,6 +6,7 @@ const STORE_LABELS = {
   kreativni_centar: 'Kreativni Centar',
   data_status:      'Data Status',
   laguna:           'Laguna',
+  vulkan:           'Knjižare Vulkan',
 };
 
 // GET /api/books/featured?limit=12

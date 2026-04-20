@@ -3,26 +3,44 @@ const { http, sleep, parsePrice, extractJsonLd } = require('./utils');
 
 const BASE  = 'https://datastatus.rs';
 const STORE = 'data_status';
-const DELAY = 250;
+const DELAY = 300;
 
 async function getBookUrls() {
-  const urls = new Set();
-  // DataStatus blocks sitemap for bots — scrape category pages directly
+  const seen = new Set();
   let page = 1;
+
   while (true) {
     try {
-      const { data } = await http.get(`${BASE}/product-category/knjige/page/${page}/`);
-      const matches = [...data.matchAll(/href="(https:\/\/datastatus\.rs\/knjige\/[^"]+)"/g)];
-      const newUrls = [...new Set(matches.map(m => m[1]))];
+      const url = page === 1 ? `${BASE}/knjige/` : `${BASE}/knjige/page/${page}/`;
+      const { data } = await http.get(url);
+      const matches = [...data.matchAll(/href="(https:\/\/datastatus\.rs\/knjige\/[^"#?]+)"/g)];
+      const newUrls = matches
+        .map(m => m[1].replace(/\/$/, '') + '/')
+        .filter(u => !/\/page\/|\/feed\/|\/category\/|\/tag\//.test(u))
+        .filter(u => !seen.has(u));
+
       if (!newUrls.length) break;
-      newUrls.forEach(u => urls.add(u));
+      newUrls.forEach(u => seen.add(u));
       page++;
       await sleep(400);
     } catch {
       break;
     }
   }
-  return [...urls];
+
+  return [...seen];
+}
+
+function extractAuthor(ld, $) {
+  // Data Status stores author in additionalProperty
+  const props = ld?.additionalProperty || [];
+  const authorProp = props.find(p => p.name === 'pa_book-author');
+  if (authorProp?.value) return authorProp.value;
+
+  // Fallback: standard schema author field
+  return ld?.author?.[0]?.name || ld?.author?.name
+      || $('span[itemprop="author"]').text().trim()
+      || null;
 }
 
 async function scrapeBook(url) {
@@ -31,31 +49,33 @@ async function scrapeBook(url) {
     const $  = cheerio.load(html);
     const ld = extractJsonLd(html);
 
-    const title  = ld?.name        || $('h1.product_title').text().trim();
-    const author = ld?.author?.[0]?.name || ld?.author?.name
-                || $('span.author a').first().text().trim()
-                || null;
-    const cover  = ld?.image       || $('img.wp-post-image').attr('src')
-                || $('img.wp-post-image').attr('data-src') || null;
-    const desc   = ld?.description || $('meta[name="description"]').attr('content') || null;
-    const isbn   = ld?.isbn        || $('[itemprop="isbn"]').text().trim() || null;
+    // Title: strip "| Data STATUS" suffix
+    const rawTitle = ld?.name || $('h1.product_title').text().trim();
+    const title = rawTitle?.replace(/\s*\|\s*Data STATUS\s*$/i, '').trim();
 
-    // WooCommerce: prefer sale price (ins), otherwise regular
-    let priceEl = $('span.price > ins span.woocommerce-Price-amount bdi');
-    if (!priceEl.length) priceEl = $('span.price span.woocommerce-Price-amount bdi');
-    const price = parsePrice(priceEl.first().text());
+    const author = extractAuthor(ld, $) || 'Nepoznat autor';
+    const isbn   = ld?.sku || $('[itemprop="isbn"]').text().trim() || null;
+    const cover  = ld?.image?.[0]?.url || ld?.image || $('img.wp-post-image').attr('src') || null;
+    const desc   = ld?.description || $('meta[name="description"]').attr('content') || null;
+
+    // Price from JSON-LD offers
+    const priceRaw = ld?.offers?.price;
+    const price = priceRaw ? Math.round(parseFloat(priceRaw)) : parsePrice($('span.woocommerce-Price-amount bdi').first().text());
+
+    const inStock = ld?.offers?.availability?.includes('InStock') ?? true;
 
     if (!title || !price) return null;
 
     return {
       store: STORE,
       store_url: url,
-      isbn: isbn || null,
+      isbn,
       title,
-      author: author || 'Nepoznat autor',
+      author,
       description: desc,
-      cover_url: cover || null,
+      cover_url: cover,
       price,
+      in_stock: inStock ? 1 : 0,
     };
   } catch (e) {
     console.error(`[DataStatus] error scraping ${url}:`, e.message);

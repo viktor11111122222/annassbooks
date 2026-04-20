@@ -3,11 +3,13 @@ const { normalizeKey } = require('./utils');
 const kreativniCentar = require('./kreativniCentar');
 const dataStatus      = require('./dataStatus');
 const laguna          = require('./laguna');
+const vulkan          = require('./vulkan');
 
 const scrapers = [
   { name: 'Kreativni Centar', run: kreativniCentar.run },
   { name: 'Data Status',      run: dataStatus.run      },
   { name: 'Laguna',           run: laguna.run           },
+  { name: 'Vulkan',           run: vulkan.run, streaming: true },
 ];
 
 // ── Deduplication + upsert ────────────────────────────────────────────────────
@@ -63,21 +65,37 @@ async function runAll() {
   console.log('\n═══ Scrape started', new Date().toISOString(), '═══');
   let totalNew = 0, totalUpdated = 0;
 
+  const saveOne = db.transaction((b) => {
+    const bookId = upsertBook(b);
+    upsertListing(bookId, b);
+  });
+
   for (const scraper of scrapers) {
     try {
-      const books = await scraper.run();
+      if (scraper.streaming) {
+        let count = 0;
+        await scraper.run((b) => {
+          if (!b) return;
+          saveOne(b);
+          count++;
+        });
+        console.log(`[${scraper.name}] Saved ${count} listings`);
+        totalUpdated += count;
+      } else {
+        const books = await scraper.run();
 
-      const saveAll = db.transaction((books) => {
-        for (const b of books) {
-          if (!b) continue;
-          const bookId = upsertBook(b);
-          upsertListing(bookId, b);
-        }
-      });
-      saveAll(books);
+        const saveAll = db.transaction((books) => {
+          for (const b of books) {
+            if (!b) continue;
+            const bookId = upsertBook(b);
+            upsertListing(bookId, b);
+          }
+        });
+        saveAll(books);
 
-      console.log(`[${scraper.name}] Saved ${books.length} listings`);
-      totalUpdated += books.length;
+        console.log(`[${scraper.name}] Saved ${books.length} listings`);
+        totalUpdated += books.length;
+      }
     } catch (e) {
       console.error(`[${scraper.name}] FAILED:`, e.message);
     }
