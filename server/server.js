@@ -2,8 +2,9 @@ require('dotenv').config();
 const express    = require('express');
 const cors       = require('cors');
 const cron       = require('node-cron');
-const authRoutes  = require('./routes/auth');
-const booksRoutes = require('./routes/books');
+const authRoutes     = require('./routes/auth');
+const booksRoutes    = require('./routes/books');
+const wishlistRoutes = require('./routes/wishlist');
 const { runAll }  = require('./scrapers/index');
 const { recategorizeAll, seedCategories } = require('./scrapers/recategorize');
 
@@ -13,8 +14,9 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-app.use('/api/auth',  authRoutes);
-app.use('/api/books', booksRoutes);
+app.use('/api/auth',     authRoutes);
+app.use('/api/books',    booksRoutes);
+app.use('/api/wishlist', wishlistRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', app: 'AnasBooks API' });

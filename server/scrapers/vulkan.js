@@ -20,7 +20,8 @@ async function getProductsFromPage(url) {
     const products = [];
     const seen = new Set();
 
-    $('[data-productid][data-productname]').each((_, el) => {
+    // Products are in .products-new-list-wrapper > div with data-product* attrs
+    $('.products-new-list-wrapper > div[data-productid][data-productname]').each((_, el) => {
       const d = el.attribs;
       const id = d['data-productid'];
       if (!id || !d['data-productname'] || seen.has(id)) return;
@@ -48,17 +49,12 @@ async function getTotalPages(categoryUrl) {
     const { data: html } = await http.get(`${BASE}${categoryUrl}/`);
     const $ = cheerio.load(html);
 
-    // Find highest page number in pagination
+    // Pagination links use /category/page-N format
     let maxPage = 1;
     $('a[href]').each((_, el) => {
       const href = $(el).attr('href') || '';
-      const m = href.match(/[?&]page=(\d+)/);
+      const m = href.match(/\/page-(\d+)/);
       if (m) maxPage = Math.max(maxPage, parseInt(m[1]));
-    });
-    // Also check pagination text
-    $('[class*="pagination"] a, [class*="pager"] a').each((_, el) => {
-      const n = parseInt($(el).text().trim());
-      if (!isNaN(n)) maxPage = Math.max(maxPage, n);
     });
     return maxPage;
   } catch {
@@ -122,7 +118,9 @@ async function scrapeCategory(categoryPath) {
   const seenIds = new Set();
 
   for (let page = 1; page <= totalPages; page++) {
-    const url = `${BASE}${categoryPath}/?page=${page}`;
+    const url = page === 1
+      ? `${BASE}${categoryPath}/`
+      : `${BASE}${categoryPath}/page-${page}`;
     const products = await getProductsFromPage(url);
 
     let added = 0;

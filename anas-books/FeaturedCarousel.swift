@@ -62,12 +62,10 @@ struct FeaturedCard: View {
     private var coverImage: some View {
         Group {
             if let urlStr = book.cover_url, let url = URL(string: urlStr) {
-                AsyncImage(url: url) { phase in
-                    if let img = phase.image {
-                        img.resizable().scaledToFill()
-                    } else {
-                        placeholder
-                    }
+                CachedAsyncImage(url: url) { img in
+                    img.resizable().scaledToFill()
+                } placeholder: {
+                    placeholder
                 }
             } else {
                 placeholder

@@ -54,6 +54,16 @@ struct BookDetail: Codable, Identifiable {
     let listings: [Listing]
 }
 
+struct WishlistBook: Codable, Identifiable {
+    let id: Int           // book_id
+    let title: String
+    let author: String
+    let cover_url: String?
+    let min_price: Int?
+    let store_count: Int?
+    let added_at: String?
+}
+
 struct BooksResponse: Codable {
     let books: [BookSummary]
     let total: Int

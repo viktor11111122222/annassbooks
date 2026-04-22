@@ -3,6 +3,7 @@ import SwiftUI
 struct BookDetailView: View {
     let bookId: Int
     @StateObject private var vm = BooksViewModel()
+    @EnvironmentObject var auth: AuthViewModel
     @State private var detail: BookDetail?
     @State private var isLoading = true
 
@@ -27,12 +28,10 @@ struct BookDetailView: View {
                                 .frame(height: 300)
 
                             if let url = book.cover_url, let imageURL = URL(string: url) {
-                                AsyncImage(url: imageURL) { phase in
-                                    if let img = phase.image {
-                                        img.resizable().scaledToFit()
-                                    } else {
-                                        coverPlaceholder
-                                    }
+                                CachedAsyncImage(url: imageURL) { img in
+                                    img.resizable().scaledToFit()
+                                } placeholder: {
+                                    coverPlaceholder
                                 }
                                 .frame(height: 220)
                                 .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
@@ -102,6 +101,24 @@ struct BookDetailView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    Task { await auth.toggleWishlist(
+                        bookId: bookId,
+                        title:      detail?.title,
+                        author:     detail?.author,
+                        coverUrl:   detail?.cover_url,
+                        minPrice:   detail?.listings.map(\.price).min(),
+                        storeCount: detail?.listings.count
+                    )}
+                } label: {
+                    Image(systemName: auth.wishlistIds.contains(bookId) ? "heart.fill" : "heart")
+                        .foregroundColor(auth.wishlistIds.contains(bookId) ? Color(hex: "E8445A") : Color(hex: "ABABC4"))
+                        .font(.system(size: 18))
+                }
+            }
+        }
         .task {
             do {
                 detail = try await vm.fetchDetail(id: bookId)

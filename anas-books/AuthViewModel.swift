@@ -7,6 +7,13 @@ struct AuthUser: Codable, Equatable {
     let email: String
 }
 
+struct UserProfile: Codable {
+    let id: Int
+    let email: String
+    let created_at: String
+    let has_password: Bool
+}
+
 private struct AuthResponse: Codable {
     let token: String
     let user: AuthUser
@@ -18,9 +25,23 @@ private struct APIErrorResponse: Codable, Error {
 
 final class AuthViewModel: ObservableObject {
     @Published var userSession: AuthUser?
+    @Published var profile: UserProfile?
+    @Published var wishlistIds: Set<Int> = [] {
+        didSet { UserDefaults.standard.set(Array(wishlistIds), forKey: wishlistKey) }
+    }
+    @Published var wishlistBooks: [WishlistBook] = [] {
+        didSet {
+            if let data = try? JSONEncoder().encode(wishlistBooks) {
+                UserDefaults.standard.set(data, forKey: wishlistBooksKey)
+            }
+        }
+    }
     @Published var isLoading    = false
     @Published var errorMessage: String?
     @Published var resetEmailSent = false
+
+    private let wishlistKey      = "wishlist_ids"
+    private let wishlistBooksKey = "wishlist_books"
 
     #if targetEnvironment(simulator)
     private let baseURL = "http://localhost:3000/api"
@@ -32,6 +53,13 @@ final class AuthViewModel: ObservableObject {
     private let userKey  = "auth_user"
 
     init() {
+        if let saved = UserDefaults.standard.array(forKey: wishlistKey) as? [Int] {
+            _wishlistIds = Published(initialValue: Set(saved))
+        }
+        if let data  = UserDefaults.standard.data(forKey: wishlistBooksKey),
+           let books = try? JSONDecoder().decode([WishlistBook].self, from: data) {
+            _wishlistBooks = Published(initialValue: books)
+        }
         loadSavedSession()
     }
 
@@ -99,10 +127,90 @@ final class AuthViewModel: ObservableObject {
         await setLoading(false)
     }
 
+    func syncWishlist() async {
+        guard userSession != nil else { return }
+        do {
+            let serverBooks: [WishlistBook] = try await get(path: "/api/wishlist")
+            let serverIds = Set(serverBooks.map { $0.id })
+            await MainActor.run {
+                // Books in local but not on server → added offline, keep them
+                let localOnly = wishlistBooks.filter { !serverIds.contains($0.id) }
+                wishlistBooks = serverBooks + localOnly
+                wishlistIds   = Set(wishlistBooks.map { $0.id })
+            }
+            // Push any offline additions to server
+            for book in wishlistBooks where !serverIds.contains(book.id) {
+                let _: MessageResponse? = try? await post(path: "/api/wishlist/\(book.id)", body: [:])
+            }
+        } catch {
+            // Keep local state untouched
+        }
+    }
+
+    func toggleWishlist(bookId: Int, title: String? = nil, author: String? = nil,
+                        coverUrl: String? = nil, minPrice: Int? = nil, storeCount: Int? = nil) async {
+        guard userSession != nil else { return }
+        let wasIn = wishlistIds.contains(bookId)
+        await MainActor.run {
+            if wasIn {
+                wishlistIds.remove(bookId)
+                wishlistBooks.removeAll { $0.id == bookId }
+            } else {
+                wishlistIds.insert(bookId)
+                if let t = title, let a = author {
+                    let wb = WishlistBook(id: bookId, title: t, author: a,
+                                         cover_url: coverUrl, min_price: minPrice,
+                                         store_count: storeCount, added_at: nil)
+                    wishlistBooks.insert(wb, at: 0)
+                }
+            }
+        }
+        do {
+            if wasIn {
+                let _: MessageResponse = try await delete(path: "/api/wishlist/\(bookId)")
+            } else {
+                let _: MessageResponse = try await post(path: "/api/wishlist/\(bookId)", body: [:])
+            }
+        } catch {}
+    }
+
+    func fetchMe() async {
+        guard userSession != nil else { return }
+        do {
+            let p: UserProfile = try await get(path: "/auth/me")
+            await MainActor.run { self.profile = p }
+        } catch {}
+    }
+
+    func changePassword(current: String, new newPwd: String, confirm: String) async -> Bool {
+        guard newPwd == confirm else { await set(error: "Lozinke se ne poklapaju."); return false }
+        guard newPwd.count >= 6 else { await set(error: "Lozinka mora imati najmanje 6 karaktera."); return false }
+        await setLoading(true)
+        do {
+            let _: MessageResponse = try await post(
+                path: "/auth/change-password",
+                body: ["currentPassword": current, "newPassword": newPwd]
+            )
+            await setLoading(false)
+            return true
+        } catch let err as APIErrorResponse {
+            await set(error: err.message)
+        } catch {
+            await set(error: "Mrežna greška. Proverite internet vezu.")
+        }
+        await setLoading(false)
+        return false
+    }
+
     func signOut() {
         UserDefaults.standard.removeObject(forKey: tokenKey)
         UserDefaults.standard.removeObject(forKey: userKey)
         userSession = nil
+        profile = nil
+        wishlistIds = []
+        wishlistBooks = []
+        UserDefaults.standard.removeObject(forKey: wishlistKey)
+        UserDefaults.standard.removeObject(forKey: wishlistBooksKey)
     }
 
     func clearError() {
@@ -124,6 +232,37 @@ final class AuthViewModel: ObservableObject {
         if let data = try? JSONEncoder().encode(user) {
             UserDefaults.standard.set(data, forKey: userKey)
         }
+    }
+
+    private struct MessageResponse: Decodable { let message: String }
+
+    private func delete<T: Decodable>(path: String) async throws -> T {
+        guard let url = URL(string: baseURL + path) else { throw URLError(.badURL) }
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        if let token = UserDefaults.standard.string(forKey: tokenKey) {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+            if let apiError = try? JSONDecoder().decode(APIErrorResponse.self, from: data) { throw apiError }
+            throw APIErrorResponse(message: "Server error.")
+        }
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    private func get<T: Decodable>(path: String) async throws -> T {
+        guard let url = URL(string: baseURL + path) else { throw URLError(.badURL) }
+        var request = URLRequest(url: url)
+        if let token = UserDefaults.standard.string(forKey: tokenKey) {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+            if let apiError = try? JSONDecoder().decode(APIErrorResponse.self, from: data) { throw apiError }
+            throw APIErrorResponse(message: "Serverska greška.")
+        }
+        return try JSONDecoder().decode(T.self, from: data)
     }
 
     private func post<T: Decodable>(path: String, body: [String: String]) async throws -> T {

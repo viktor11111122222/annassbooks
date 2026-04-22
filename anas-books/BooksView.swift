@@ -90,7 +90,7 @@ struct BooksView: View {
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.vertical, 8)
         }
         .background(Color.white)
         .overlay(alignment: .bottom) {
@@ -154,6 +154,7 @@ struct CategoryChip: View {
 
 struct BookCard: View {
     let book: BookSummary
+    @EnvironmentObject var auth: AuthViewModel
     let violet = Color(hex: "7C5CBF")
     let mint   = Color(hex: "4DC9A0")
 
@@ -163,14 +164,12 @@ struct BookCard: View {
             ZStack {
                 Color(hex: "EEEEf8")
                 if let url = book.cover_url, let imageURL = URL(string: url) {
-                    AsyncImage(url: imageURL) { phase in
-                        if let img = phase.image {
-                            img.resizable().scaledToFill()
-                        } else {
-                            Image(systemName: "book.closed.fill")
-                                .font(.system(size: 32))
-                                .foregroundColor(Color(hex: "D0D0E8"))
-                        }
+                    CachedAsyncImage(url: imageURL) { img in
+                        img.resizable().scaledToFill()
+                    } placeholder: {
+                        Image(systemName: "book.closed.fill")
+                            .font(.system(size: 32))
+                            .foregroundColor(Color(hex: "D0D0E8"))
                     }
                     .clipped()
                 } else {
@@ -181,6 +180,25 @@ struct BookCard: View {
             }
             .frame(height: 160)
             .cornerRadius(12, corners: [.topLeft, .topRight])
+            .overlay(alignment: .topTrailing) {
+                Button {
+                    Task { await auth.toggleWishlist(bookId: book.id, title: book.title,
+                        author: book.author, coverUrl: book.cover_url,
+                        minPrice: book.min_price, storeCount: book.store_count) }
+                } label: {
+                    let isIn = auth.wishlistIds.contains(book.id)
+                    ZStack {
+                        Circle()
+                            .fill(isIn ? Color.white : Color.black.opacity(0.25))
+                            .frame(width: isIn ? 30 : 26, height: isIn ? 30 : 26)
+                        Image(systemName: isIn ? "heart.fill" : "heart")
+                            .font(.system(size: isIn ? 15 : 12, weight: .semibold))
+                            .foregroundColor(isIn ? Color(hex: "E8445A") : .white.opacity(0.7))
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(7)
+            }
 
             // Info
             VStack(alignment: .leading, spacing: 4) {

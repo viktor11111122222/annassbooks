@@ -31,6 +31,18 @@ try { db.exec(`ALTER TABLE users ADD COLUMN apple_id TEXT UNIQUE`); } catch {}
 try { db.exec(`ALTER TABLE books ADD COLUMN category TEXT DEFAULT 'ostalo'`); } catch {}
 try { db.exec(`ALTER TABLE books ADD COLUMN category_verified INTEGER DEFAULT 0`); } catch {}
 try { db.exec(`CREATE INDEX IF NOT EXISTS idx_books_category ON books(category)`); } catch {}
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS wishlists (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      book_id  INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+      added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, book_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_wishlists_user ON wishlists(user_id);
+  `);
+} catch {}
 
 // ── Books & listings ──────────────────────────────────────────────────────────
 

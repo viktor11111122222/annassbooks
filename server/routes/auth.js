@@ -221,4 +221,49 @@ router.post('/apple', async (req, res) => {
   }
 });
 
+// ─── Profil korisnika ─────────────────────────────────────────────────────────
+
+const authMiddleware = require('../middleware/auth');
+
+router.get('/me', authMiddleware, (req, res) => {
+  try {
+    const user = db.prepare('SELECT id, email, created_at, password_hash FROM users WHERE id = ?').get(req.user.userId);
+    if (!user) return res.status(404).json({ message: 'Korisnik nije pronađen.' });
+    res.json({
+      id: user.id,
+      email: user.email,
+      created_at: user.created_at,
+      has_password: !!(user.password_hash && user.password_hash.length > 0),
+    });
+  } catch (err) {
+    console.error('GET /me:', err);
+    res.status(500).json({ message: 'Serverska greška.' });
+  }
+});
+
+// ─── Promena lozinke ──────────────────────────────────────────────────────────
+
+router.post('/change-password', authMiddleware, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword)
+      return res.status(400).json({ message: 'Sva polja su obavezna.' });
+    if (newPassword.length < 6)
+      return res.status(400).json({ message: 'Nova lozinka mora imati najmanje 6 karaktera.' });
+
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.userId);
+    if (!user) return res.status(404).json({ message: 'Korisnik nije pronađen.' });
+
+    const valid = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!valid) return res.status(401).json({ message: 'Pogrešna trenutna lozinka.' });
+
+    const hash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, user.id);
+    res.json({ message: 'Lozinka je uspešno promenjena.' });
+  } catch (err) {
+    console.error('POST /change-password:', err);
+    res.status(500).json({ message: 'Serverska greška.' });
+  }
+});
+
 module.exports = router;
